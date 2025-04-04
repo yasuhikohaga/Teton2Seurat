@@ -29,3 +29,49 @@ RNA_seurat_data@meta.data$nFeature_Protein <- Protein_seurat_data@meta.data$nFea
 saveRDS(RNA_seurat_data, file = "~/Teton_raw_counts.rds")
 
 ##after that, I filtered cells and normalized in Seurat. It means I didn't use filter_cells() and normalize_cytoprofiling() functions. (But I'm not sure this method is the best)
+Teton_seurat_data <- RNA_seurat_data
+rm(RNA_seurat_data)
+Teton_seurat_data@meta.data$WellLabel <- factor(Teton_seurat_data@meta.data$WellLabel, 
+                levels = c("HepG2_10k", "HepG2_8k", "PC9", "PC9_with_gef", "PC9_2", "PC9_3", "PC9_22", "PC9_23", "PC9_40", "PC9_41", "PC9-ER", "PC9-ER_with_gef"))
+#filtering
+VlnPlot(Teton_seurat_data, features = c("nCount_RNA", "nFeature_RNA", "nCount_Protein", "nFeature_Protein"), ncol = 2,
+  log = TRUE, pt.size = 0, group.by = "WellLabel") + NoLegend()
+Teton_seurat_data <- subset(
+  x = Teton_seurat_data,
+  subset = nCount_RNA > 20
+) #> Removing 46280 cells missing data for vars requested
+
+#normalization
+#RNA
+DefaultAssay(Teton_seurat_data) <- "RNA"
+Teton_seurat_data <- NormalizeData(Teton_seurat_data, normalization.method = "LogNormalize", scale.factor = 10000)
+Teton_seurat_data <- FindVariableFeatures(Teton_seurat_data, selection.method = "vst", nfeatures = 50)
+all.genes <- rownames(Teton_seurat_data)
+Teton_seurat_data <- ScaleData(Teton_seurat_data, features = all.genes)
+Teton_seurat_data <- RunPCA(Teton_seurat_data, features = VariableFeatures(object = Teton_seurat_data), npcs=20)
+ElbowPlot(Teton_seurat_data)#10 is good
+Teton_seurat_data <- RunUMAP(Teton_seurat_data, dims = 1:10, reduction.name = 'umap.rna', reduction.key = 'rnaUMAP_')
+DimPlot(Teton_seurat_data, reduction = "umap.rna")
+
+#Protein
+DefaultAssay(Teton_seurat_data) <- "Protein"
+Teton_seurat_data <- NormalizeData(object = Teton_seurat_data, normalization.method = "CLR", margin = 2)
+all.genes <- rownames(Teton_seurat_data)
+Teton_seurat_data <- ScaleData(Teton_seurat_data, features = all.genes)
+VariableFeatures(Teton_seurat_data) <- rownames(Teton_seurat_data)  # since the panel is small, treat all features as variable.
+Teton_seurat_data <- RunPCA(object = Teton_seurat_data, npcs = 20, verbose = FALSE, reduction.name = 'apca')
+ElbowPlot(Teton_seurat_data)#10 looks good
+Teton_seurat_data <- RunUMAP(object = Teton_seurat_data, reduction = 'apca', dims = 1:10, verbose = FALSE, reduction.name = 'umap.protein', reduction.key = 'proteinUMAP_')
+DimPlot(Teton_seurat_data, reduction = "umap.protein")
+
+#integrate by wnn
+Teton_seurat_data <- FindMultiModalNeighbors(
+  Teton_seurat_data, reduction.list = list("pca", "apca"), 
+  dims.list = list(1:10, 1:10), modality.weight.name = "RNA.weight"
+)
+Teton_seurat_data <- RunUMAP(Teton_seurat_data, nn.name = "weighted.nn", reduction.name = "wnn.umap", reduction.key = "wnnUMAP_")
+Teton_seurat_data <- FindClusters(Teton_seurat_data, graph.name = "wsnn", algorithm = 3, resolution = 2, verbose = FALSE)#take quite long time
+DimPlot(Teton_seurat_data, reduction = "wnn.umap", group.by = "WellLabel")
+saveRDS(Teton_seurat_data, file = "~/Teton_finish_processed.rds")
+
+
